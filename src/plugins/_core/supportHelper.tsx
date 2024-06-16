@@ -164,7 +164,7 @@ ${makeCodeblock(enabledPlugins.join(", "))}
                             contact your package maintainer for support instead.
                         </Forms.FormText>
                     </div>,
-                    onCloseCallback: () => setTimeout(() => NavigationRouter.back(), 50)
+                    onCloseCallback: undefined, // () => setTimeout(() => NavigationRouter.back(), 50)
                 });
             }
         }
