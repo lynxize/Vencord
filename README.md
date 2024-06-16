@@ -1,3 +1,8 @@
+
+> [!WARNING]
+> I'm not a frontend dev, and have no idea what I'm doing.
+> Don't expect good code quality.
+
 Some random userplugins for [Vencord](https://github.com/Vendicated/Vencord/) (maybe)
 
 see `src/userplugins`
