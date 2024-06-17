@@ -41,7 +41,7 @@ const settings = definePluginSettings({
         ],
         restartNeeded: true, // to update previously rendered names
         onChange(_: any) {
-            cachedColors.clear();
+            colors.clear();
         }
     }
 });
@@ -72,15 +72,15 @@ export default definePlugin({
     renderUsername: ({ author, message }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message.channel_id, message.id) || settings.store.colorMode === "None") return <>{author?.nick}</>;
 
-        if (!cachedColors[message.channel_id]) cachedColors[message.channel_id] = new Map();
+        if (!colors[message.channel_id]) colors[message.channel_id] = new Map();
 
-        var c = cachedColors[message.channel_id][author.nick];
-        if (!c || c.expires < Date.now()) toCheck.push([message.channel_id, message.id, author.nick]);
+        var c = colors[message.channel_id][author.nick];
+        if (!c || c.expires < Date.now()) colorsToGet.push([message.channel_id, message.id, author.nick]);
 
         while (!c) {
             // wait around until it gets around to fetching the color we want
             await new Promise(r => setTimeout(r, 500));
-            c = cachedColors[message.channel_id][author.nick];
+            c = colors[message.channel_id][author.nick];
         }
 
         return <span style={{ color: c.color }}>{author.nick}</span>;
@@ -131,38 +131,38 @@ export default definePlugin({
     }
 });
 
-
+// holds an expiry time so that we periodically update colors (for instance, if someone changed their member color)
 class NameColor {
     expires: number;
     color: string;
 
-    constructor(color: string, expires: number | undefined = undefined) {
+    constructor(color: string, expires: number) {
+        this.expires = expires;
         this.color = color;
-        if (!expires) this.expires = Date.now() + 120 * 1000; // two minutes from now
-        else this.expires = expires;
     }
 }
 
 
-const toCheck = new Array<[string, string, string]>(); // channel id, message id, nick
-const cachedColors = new Map<string, Map<string, NameColor>>(); // channel: (nick: color)
+const colorsToGet = new Array<[string, string, string]>(); // channel id, message id, nickname
+const colors = new Map<string, Map<string, NameColor>>(); // channel: (nickname: color)
 
 // this loops forever, getting colors as fast as we can without running
 // into the pk api ratelimit of 2 requests per second
 // it's not great, but it works
 async function fetchColors() {
     while (true) {
-        if (toCheck.length === 0) {
+        if (colorsToGet.length === 0) {
             await new Promise(r => setTimeout(r, 100));
             continue;
         }
 
-        const [channelId, messageId, nick] = toCheck.pop()!!;
+        const [channelId, messageId, nick] = colorsToGet.pop()!!;
 
-        // check if there's one unexpired
-        const existing = cachedColors[channelId][messageId];
-        if (existing && existing.expires > Date.now()) continue;
+        const existing = colors[channelId][messageId];
+        if (existing && existing.expires > Date.now()) continue; // unexpired one exists, skip
 
+
+        // we don't have a color for this nickname already, so hit the pk api
         const request = await fetch("https://api.pluralkit.me/v2/messages/" + messageId);
         const json = await request.json();
 
@@ -174,7 +174,7 @@ async function fetchColors() {
 
         color = color ?? "#666666"; // something went wrong
 
-        cachedColors[channelId][nick] = new NameColor(color);
+        colors[channelId][nick] = new NameColor(color, Date.now() + 120 * 1000); // expires two minutes from now
 
         await new Promise(r => setTimeout(r, 500)); // we don't want to do more than 2 requests per second
     }
@@ -185,7 +185,7 @@ async function fetchColors() {
 // just to prevent them growing infinitely
 async function clearExpiredColors() {
     const now = Date.now();
-    cachedColors.forEach((value, key) => {
+    colors.forEach((value, key) => {
         for (const nick in value.keys()) {
             if (value[nick].expires < now) {
                 value.delete(nick);
