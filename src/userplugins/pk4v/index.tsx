@@ -4,6 +4,7 @@ import { definePluginSettings } from "@api/Settings";
 import { ChannelStore, FluxDispatcher, GuildMemberStore, MessageActions, MessageStore } from "@webpack/common";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { addPreEditListener, addPreSendListener, removePreEditListener } from "@api/MessageEvents";
+import { useAwaiter } from "@utils/react";
 
 // some of this is inspired by PluralChum
 // some of this is inspired by a similar Vencord plugin by Scyye
@@ -81,8 +82,8 @@ async function fetchColors() {
 
         const colorMode = settings.store.colorMode;
         let color: string | undefined = undefined;
-        if (colorMode == "Member") color = "#" + json.member.color;
-        else if (colorMode == "System") color = "#" + json.system.color
+        if (colorMode == "Member") color = "#" + json.member?.color;
+        else if (colorMode == "System") color = "#" + json.system?.color
         else if (colorMode == "Account") color = GuildMemberStore.getMember(ChannelStore.getChannel(channelId).guild_id, json.sender)?.colorString
 
         color = color ?? "#666666" // something went wrong
@@ -105,15 +106,6 @@ async function clearExpiredColors() {
             }
         }
     })
-}
-
-function getCachedColorByName(nick: string, channelId: string, messageId: string): string {
-    if (!cachedColors[channelId]) cachedColors[channelId] = new Map()
-
-    const c = cachedColors[channelId][nick]
-    if (!c || c.expires < Date.now()) toCheck.push([channelId, messageId, nick])
-
-    return c?.color ?? "#666666";
 }
 
 export default definePlugin({
@@ -139,19 +131,28 @@ export default definePlugin({
     ],
 
 
-    renderUsername: ({
-        author,
-        message
-    }) => {
+    renderUsername: ({ author, message }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message.channel_id, message.id) || settings.store.colorMode == "None") return <>{author?.nick}</>;
 
-        return <span style={{color:  getCachedColorByName(author.nick, message.channel_id, message.id)}}>{author.nick}</span>
-    },
+        if (!cachedColors[message.channel_id]) cachedColors[message.channel_id] = new Map()
+
+        var c = cachedColors[message.channel_id][author.nick]
+        if (!c || c.expires < Date.now()) toCheck.push([message.channel_id, message.id, author.nick])
+
+        while (!c) {
+            // wait around until it gets around to fetching the color we want
+            await new Promise(r => setTimeout(r, 500));
+            c = cachedColors[message.channel_id][author.nick]
+        }
+
+        return <span style={{ color: c.color }}>{author.nick}</span>
+    }, {fallbackValue: <>{author?.nick}</>}),
+
 
     start() {
 
-        fetchColors()
-        setInterval(clearExpiredColors, 1000 * 60 * 5)
+        fetchColors();
+        setInterval(clearExpiredColors, 1000 * 60 * 5);
 
         addButton("PkEdit", msg => {
             // this doesn't check if its *your* pk message
