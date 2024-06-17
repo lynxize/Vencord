@@ -8,7 +8,7 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore } from "@w
 
 // Inspired By:
 //  - PluralChum
-//  - Scyye's vencord plugin
+//  - Scyye's pluralkit + vencord plugin
 
 // Cobbled together through intense googling and trial and error + frustration
 // (I'm very much not a JS/TS or frontend dev)
@@ -22,6 +22,7 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore } from "@w
 // - pk users with identical display names will share the same color - probably unfixable because of api ratelimit
 // - pk edit button doesn't quite match normal discord
 // - up arrow to edit most recent message doesn't work
+// - seems to conflict with showMeYourName, which makes sense because the patch is basically the same
 
 // Future Ideas:
 // - Option to enforce minimum hsv value for colors (for readability)
@@ -59,7 +60,7 @@ export default definePlugin({
     ],
     patches: [
         {
-            // from showMeYourName plugin
+            // from showMeYourName plugin // todo: find a way to do this without conflicting
             find: ".useCanSeeRemixBadge)",
             replacement: {
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
