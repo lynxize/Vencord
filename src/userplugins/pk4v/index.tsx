@@ -4,6 +4,8 @@ import { definePluginSettings } from "@api/Settings";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
+import { DeleteIcon } from "@components/Icons";
+import { findByPropsLazy } from "@webpack";
 
 
 // Inspired By:
@@ -14,7 +16,8 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore
 // (I'm very much not a JS/TS or frontend dev)
 
 // Features:
-// - Adds edit button to proxied messages, allowing them to be edited like normal
+// - Adds an edit button to proxied messages, allowing them to be edited like normal
+// - Adds a delete button to proxied messages
 // - Optionally colors member names with either member color, system color, or account role color
 
 // Known Issues:
@@ -26,6 +29,7 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore
 // - Option to enforce minimum hsv value for colors (for readability)
 // - Remove/replace bot/app tag with either "pk" or nothing
 // - Maybe make clicking on profiles work? Not sure if it's possible
+// - Delete message confirmation modal + shift to skip (to match normal messages)
 
 const PLURALKIT_BOT_ID = "466378653216014359";
 
@@ -96,11 +100,35 @@ export default definePlugin({
         addButton("PkEdit", msg => {
             if (!msg || !isOwnPkMessage({ channelId: msg.getChannelId(), messageId: msg.id })) return null;
 
-            const handleClick = () => MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content);
+            function handleClick() {
+                MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content);
+            }
 
             return {
                 label: "Edit (PK)",
                 icon: EditIcon,
+                message: msg,
+                channel: ChannelStore.getChannel(msg.channel_id),
+                onClick: handleClick,
+                onContextMenu: _ => {
+                }
+            };
+        });
+
+        addButton("PkDelete", msg => {
+            if (!msg || !isOwnPkMessage({ channelId: msg.getChannelId(), messageId: msg.id })) return null;
+
+            function handleClick() {
+                Reactions.addReaction(msg.channel_id, msg.id, {
+                    id: undefined,
+                    name: "❌",
+                    animated: false
+                });
+            }
+
+            return {
+                label: "Delete (PK)",
+                icon: DeleteIcon,
                 message: msg,
                 channel: ChannelStore.getChannel(msg.channel_id),
                 onClick: handleClick,
@@ -126,6 +154,7 @@ export default definePlugin({
 
     stop() {
         removeButton("PkEdit");
+        removeButton("PkDelete");
         removePreEditListener(this.preEditListener);
     }
 });
@@ -137,7 +166,7 @@ const colors = new Map<AuthorIdentifier, NameColor>();
 
 // this loops forever, getting colors as fast as we can without running
 // into the pk api ratelimit of 2 requests per second
-// it's not great, but it works
+// it's not a great solution, but it works
 async function fetchColors() {
     // noinspection InfiniteLoopJS
     while (true) {
@@ -151,8 +180,6 @@ async function fetchColors() {
         const existing = colors[authorId];
         if (existing && existing.expires > Date.now()) continue; // unexpired one exists, skip
 
-
-        // we don't have a color for this nickname already, so hit the pk api
         const request = await fetch("https://api.pluralkit.me/v2/messages/" + message.messageId);
         const json = await request.json();
 
@@ -235,3 +262,5 @@ const EditIcon = () => {
             d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
     </svg>;
 };
+
+const Reactions = findByPropsLazy("addReaction");

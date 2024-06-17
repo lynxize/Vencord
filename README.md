@@ -18,7 +18,7 @@ Installation instructions can be found [here](https://github.com/Vendicated/Venc
 
 [PluralKit](https://pluralkit.me/) integration, inspired by [PluralChum](https://github.com/estroBiologist/pluralchum) and [this earlier Vencord plugin](https://github.com/Vendicated/Vencord/pull/2536/).
 
-Adds an "edit message" button to proxied messages, allowing them to be edited as if they were normal discord messages. Optionally allows coloring of member names in chat by either member color, system color, or highest account role color.
+Adds edit and delete buttons to proxied messages. Optionally allows coloring of member names in chat by either member color, system color, or highest account role color.
 
 (see [the plugin itself](src/userplugins/pk4v/index.tsx) for known issues and more information)
 
