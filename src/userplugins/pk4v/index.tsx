@@ -1,18 +1,19 @@
 /* eslint-disable */
 import definePlugin, { OptionType } from "@utils/types";
 import { definePluginSettings } from "@api/Settings";
-import { Channel, Message, User } from "discord-types/general";
-import { ChannelStore, GuildMemberStore, MessageActions, MessageStore } from "@webpack/common";
+import { ChannelStore, FluxDispatcher, GuildMemberStore, MessageActions, MessageStore } from "@webpack/common";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { addPreEditListener, addPreSendListener, removePreEditListener } from "@api/MessageEvents";
 
+// some of this is inspired by PluralChum
+// some of this is inspired by a similar Vencord plugin by Scyye
+// this was cobbled together from the rest of the vencord plugins
 
-// some of this is inspired by a similar plugin by Scyye
-// and also cobbled together from the rest of the vencord plugins
 // (I'm very much not a JS/TS frontend dev)
 
-// known issues
-// - pk edit button appears for all pk proxied messages
+// known issues:
+// - pk edit button appears for all pk proxied messages - probably unfixable because of api ratelimit
+// - pk users with identical display names will share the same color - probably unfixable because of api ratelimit
 // - pk edit button doesn't quite match normal discord
 // - up arrow to edit most recent message doesn't work
 
@@ -35,40 +36,84 @@ const settings = definePluginSettings({
             { label: "Color by member color", value: "Member" },
             { label: "Color by system color", value: "System"},
             { label: "No color", value: "None"}
-        ]
+        ],
+        onChange(newValue: any) {
+            cachedColors.clear()
+        }
     }
 });
 
-// channel: (nick: color)
-const cachedColors = new Map<string, Map<string, string>>();
+
+class NameColor {
+    expires: number;
+    color: string
+
+    constructor(color: string, expires: number | undefined = undefined) {
+        this.color = color;
+        if (!expires) this.expires = Date.now() + 120 * 1000; // two minutes from now
+        else this.expires = expires;
+    }
+}
 
 
+var toCheck = new Array<[string, string, string]>() // channel id, message id, nick
+const cachedColors = new Map<string, Map<string, NameColor>>(); // channel: (nick: color)
 
-function getColorByName(nick: string, channelId: string, messageId: string): string {
+
+// this loops forever, getting colors as fast as we can without running
+// into the pk api ratelimit of 2 requests per second
+// it's not great, but it works
+async function fetchColors() {
+    while (true) {
+        if (toCheck.length == 0) {
+            await new Promise(r => setTimeout(r, 100));
+            continue
+        }
+
+        const [channelId, messageId, nick] = toCheck.pop()!!
+
+        // check if there's one unexpired
+        let p = cachedColors[channelId][messageId]
+        if (p && p.expires > Date.now()) continue
+
+        const request = await fetch("https://api.pluralkit.me/v2/messages/" + messageId)
+        const json = await request.json()
+
+        const colorMode = settings.store.colorMode;
+        let color: string | undefined = undefined;
+        if (colorMode == "Member") color = "#" + json.member.color;
+        else if (colorMode == "System") color = "#" + json.system.color
+        else if (colorMode == "Account") color = GuildMemberStore.getMember(ChannelStore.getChannel(channelId).guild_id, json.sender)?.colorString
+
+        color = color ?? "#666666" // something went wrong
+
+        cachedColors[channelId][nick] = new NameColor(color)
+
+        await new Promise(r => setTimeout(r, 500)); // we don't want to do more than 2 requests per second
+    }
+}
+
+
+// Every once in a while we need to get rid of expired color entries
+// just to prevent them growing infinitely
+async function clearExpiredColors() {
+    const now = Date.now()
+    cachedColors.forEach((value, key) => {
+        for (const nick in value.keys()) {
+            if (value[nick].expires < now) {
+                value.delete(nick)
+            }
+        }
+    })
+}
+
+function getCachedColorByName(nick: string, channelId: string, messageId: string): string {
     if (!cachedColors[channelId]) cachedColors[channelId] = new Map()
 
-    if (!cachedColors[channelId][nick]) {
-        cachedColors[channelId][nick] = "#FFFFFF" // prevents other messages from trying to request for the same nick
+    const c = cachedColors[channelId][nick]
+    if (!c || c.expires < Date.now()) toCheck.push([channelId, messageId, nick])
 
-        fetch("https://api.pluralkit.me/v2/messages/" + messageId)
-            .then((a) => a.json())
-            .then((j) => {
-                //console.log(j)
-                const colorMode = settings.store.colorMode;
-                var color: string;
-                if (colorMode == "Member") color = "#" + j.member.color;
-                else if (colorMode == "System") color = "#" + j.system.color
-                else if (colorMode == "Account") color = GuildMemberStore.getMember(ChannelStore.getChannel(channelId).guild_id, j.sender).colorString
-                else color = "#FF0000" // something went wrong
-
-                cachedColors[channelId][nick] = color;
-            })
-            .catch(() => {
-                cachedColors[channelId].delete(nick)
-            })
-    }
-
-    return cachedColors[channelId][nick];
+    return c?.color ?? "#666666";
 }
 
 export default definePlugin({
@@ -100,10 +145,14 @@ export default definePlugin({
     }) => {
         if (!isPkProxiedMessage(message.channel_id, message.id) || settings.store.colorMode == "None") return <>{author?.nick}</>;
 
-        return <span style={{color: getColorByName(author.nick, message.channel_id, message.id)}}>{author.nick}</span>
+        return <span style={{color:  getCachedColorByName(author.nick, message.channel_id, message.id)}}>{author.nick}</span>
     },
 
     start() {
+
+        fetchColors()
+        setInterval(clearExpiredColors, 1000 * 60 * 5)
+
         addButton("PkEdit", msg => {
             // this doesn't check if its *your* pk message
             // not sure how to avoid that without running into pk api ratelimiting issues
