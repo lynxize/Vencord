@@ -1,9 +1,8 @@
 /* eslint-disable */
 import definePlugin, { OptionType } from "@utils/types";
 import { definePluginSettings } from "@api/Settings";
-import PKAPI from "pkapi.js";
-import { Message, User } from "discord-types/general";
-import { ChannelStore, MessageActions, MessageStore } from "@webpack/common";
+import { Channel, Message, User } from "discord-types/general";
+import { ChannelStore, GuildMemberStore, MessageActions, MessageStore } from "@webpack/common";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { addPreEditListener, addPreSendListener, removePreEditListener } from "@api/MessageEvents";
 
@@ -40,13 +39,43 @@ const settings = definePluginSettings({
     }
 });
 
-var pk = new PKAPI({});
+// channel: (nick: color)
+const cachedColors = new Map<string, Map<string, string>>();
 
+
+
+function getColorByName(nick: string, channelId: string, messageId: string): string {
+    if (!cachedColors[channelId]) cachedColors[channelId] = new Map()
+
+    if (!cachedColors[channelId][nick]) {
+        cachedColors[channelId][nick] = "#FFFFFF" // prevents other messages from trying to request for the same nick
+
+        fetch("https://api.pluralkit.me/v2/messages/" + messageId)
+            .then((a) => a.json())
+            .then((j) => {
+                //console.log(j)
+                const colorMode = settings.store.colorMode;
+                var color: string;
+                if (colorMode == "Member") color = "#" + j.member.color;
+                else if (colorMode == "System") color = "#" + j.system.color
+                else if (colorMode == "Account") color = GuildMemberStore.getMember(ChannelStore.getChannel(channelId).guild_id, j.sender).colorString
+                else color = "#FF0000" // something went wrong
+
+                cachedColors[channelId][nick] = color;
+            })
+            .catch(() => {
+                cachedColors[channelId].delete(nick)
+            })
+    }
+
+    return cachedColors[channelId][nick];
+}
 
 export default definePlugin({
     settings,
     name: "PluralKit Integration",
     description: "Makes PluralKit less painful to use",
+    dependencies: ["MessageEventsAPI"], // is this needed?
     authors: [
         {
             id: 951258605615718410n,
@@ -61,18 +90,17 @@ export default definePlugin({
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
                 replace: "$self.renderUsername(arguments[0])}"
             }
-        }
+        },
     ],
+
 
     renderUsername: ({
         author,
-        m,
-        isRepliedMessage,
-        withMentionPrefix,
-        userOverride
+        message
     }) => {
-        if (!author.hasOwnProperty("clan")) return <span style={{color: "#0000ff"}}>{author?.nick}</span>;
-        else return <>{author?.nick}</>
+        if (!isPkProxiedMessage(message.channel_id, message.id) || settings.store.colorMode == "None") return <>{author?.nick}</>;
+
+        return <span style={{color: getColorByName(author.nick, message.channel_id, message.id)}}>{author.nick}</span>
     },
 
     start() {
@@ -93,6 +121,7 @@ export default definePlugin({
             };
         });
 
+
         this.preEditListener = addPreEditListener((channelId, messageId, messageObj) => {
             if (isPkProxiedMessage(channelId, messageId)) {
                 const guild_id = ChannelStore.getChannel(channelId).guild_id;
@@ -102,6 +131,7 @@ export default definePlugin({
                 })
                 //return {cancel: true}
                 // note that presumably we're sending off invalid edit requests, hopefully that doesn't cause issues
+                // todo: look into closing the edit box without sending a bad edit request to discord
             }
         })
     },
@@ -115,5 +145,5 @@ export default definePlugin({
 
 function isPkProxiedMessage(channelId: string, messageId: string): boolean {
     const msg =  MessageStore.getMessage(channelId, messageId); // monosodium glutamate
-    return msg.applicationId === "466378653216014359" && msg.webhookId != undefined
+    return msg && msg.applicationId === "466378653216014359" && msg.webhookId != undefined
 }
