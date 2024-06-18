@@ -14,7 +14,7 @@ Installation instructions can be found [here](https://github.com/Vendicated/Venc
 
 ## Plugins
 
-### pk4v
+### pk4vc
 
 [PluralKit](https://pluralkit.me/) integration, inspired by [PluralChum](https://github.com/estroBiologist/pluralchum) and [this earlier Vencord plugin](https://github.com/Vendicated/Vencord/pull/2536/).
 
@@ -22,7 +22,7 @@ Installation instructions can be found [here](https://github.com/Vendicated/Venc
 - Optionally allows coloring of member names in chat by either member color, system color, or highest account role color
 - Replaces the annoying`APP` (formerly `BOT`) tag with `PK`
 
-(see [the plugin itself](src/userplugins/pk4v/index.tsx) for known issues and more information)
+(see [the plugin itself](src/userplugins/pk4vc/index.tsx) for known issues and more information)
 
 ### More soon?
 
