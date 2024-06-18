@@ -19,19 +19,26 @@ import { findByPropsLazy } from "@webpack";
 // - Adds an edit button to proxied messages, allowing them to be edited like normal
 // - Adds a delete button to proxied messages
 // - Optionally colors member names with either member color, system color, or account role color
+// - Replaces the "APP" (formerly "BOT") tag with "PK"
 
 // Known Issues:
 // - pk edit button doesn't quite match normal discord
 // - up arrow to edit most recent message doesn't work
 // - seems to conflict with showMeYourName, which makes sense because the patch is basically the same
+// - conflicts with moreUserTags in that moreUserTags overwrites the "PK" tag with "WEBHOOK"
 
 // Future Ideas:
 // - Option to enforce minimum hsv value for colors (for readability)
-// - Remove/replace bot/app tag with either "pk" or nothing
 // - Maybe make clicking on profiles work? Not sure if it's possible
 // - Delete message confirmation modal + shift to skip (to match normal messages)
 
 const PLURALKIT_BOT_ID = "466378653216014359";
+
+// the pk badge is hardcoded to be tag type 237
+// why? uh, discord uses up to ~8, moreUserTags uses 100-1XX
+// hopefully nobody else tries to pick 237
+// This Is Very Good Code :tm: /s
+const PK_BADGE_ID = 237;
 
 const settings = definePluginSettings({
     colorMode: {
@@ -71,7 +78,31 @@ export default definePlugin({
                 replace: "$self.renderUsername(arguments[0])}"
             }
         },
+
+        // if a message is proxied, forcibly change the tag type
+        {
+            find: ".isPublicSystemMessage)",
+            replacement: {
+                match: /\.default\)\((.)\)\?(.{0,200}).\.default\.Types\.BOT/,
+                replace: ".default)($1)?$2$self.checkBotBadge($1)"
+            }
+        },
+
+        // displays the injected tag type as "PK"
+        {
+            find: "BotTagTypes.SERVER:",
+            replacement: {
+                match: /case (.)\.BotTagTypes\.SERVER:(.)=/,
+                replace: "case "+PK_BADGE_ID+":$2=\"PK\";break;case $1.BotTagTypes.SERVER:$2="
+            }
+        },
     ],
+
+    checkBotBadge: message => {
+        if (isPkProxiedMessage({ channelId: message.getChannelId(), messageId: message.id })) {
+            return PK_BADGE_ID;
+        } else return 0; // 0 is bot tag id
+    },
 
     renderUsername: ({ author, message }) => useAwaiter(async () => {
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
