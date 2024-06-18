@@ -13,6 +13,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 import { Message } from "discord-types/general";
+import { hexToHSL, hslToHex } from "./color";
 
 
 // Inspired By:
@@ -34,7 +35,6 @@ import { Message } from "discord-types/general";
 // - conflicts with moreUserTags in that moreUserTags overwrites the "PK" tag with "WEBHOOK"
 
 // Future Ideas:
-// - Option to enforce minimum hsv value for colors (for readability)
 // - Maybe make clicking on profiles work? Not sure if it's possible
 // - Delete message confirmation modal + shift to skip (to match normal messages)
 
@@ -64,6 +64,15 @@ const settings = definePluginSettings({
         ],
         restartNeeded: true, // to update previously rendered names
         onChange(_: any) {
+            colors.clear();
+        }
+    },
+    readableColors: {
+        description: "Adjust Member/System colors for readability",
+        type: OptionType.BOOLEAN,
+        default: false,
+        restartNeeded: true,
+        onChange(newValue: any) {
             colors.clear();
         }
     }
@@ -105,7 +114,7 @@ export default definePlugin({
             find: "BotTagTypes.SERVER:",
             replacement: {
                 match: /case (.)\.BotTagTypes\.SERVER:(.)=/,
-                replace: "case "+PK_BADGE_ID+":$2=\"PK\";break;case $1.BotTagTypes.SERVER:$2="
+                replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.BotTagTypes.SERVER:$2="
             }
         },
         // make up arrow to edit most recent message work
@@ -259,6 +268,10 @@ async function fetchColors() {
             color = account?.colorString;
         }
 
+        if (settings.store.readableColors && (colorMode === "Member" || colorMode === "System")) {
+            const [h, s, l] = hexToHSL(color);
+            color = hslToHex([h, s, Math.max(l, 70)]);
+        }
 
         colors[authorId] = {
             color: color,
@@ -329,7 +342,7 @@ type MessageInfo = {
 const EditIcon = () => {
     return <svg role="img" width="18" height="18" fill="none" viewBox="0 0 24 24">
         <path fill="currentColor"
-            d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
+              d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
     </svg>;
 };
 
