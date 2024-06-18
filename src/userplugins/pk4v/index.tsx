@@ -1,11 +1,17 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2024 Vendicated and contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 import { addPreEditListener, removePreEditListener } from "@api/MessageEvents";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { definePluginSettings } from "@api/Settings";
+import { DeleteIcon } from "@components/Icons";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
-import { DeleteIcon } from "@components/Icons";
 import { findByPropsLazy } from "@webpack";
+import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 
 
 // Inspired By:
@@ -211,8 +217,17 @@ async function fetchColors() {
         const existing = colors[authorId];
         if (existing && existing.expires > Date.now()) continue; // unexpired one exists, skip
 
-        const request = await fetch("https://api.pluralkit.me/v2/messages/" + message.messageId);
-        const json = await request.json();
+        let json: any;
+        try {
+            const request = await fetch("https://api.pluralkit.me/v2/messages/" + message.messageId);
+            json = await request.json();
+        } catch (e) {
+            console.log(e);
+            // wait a bit before trying again
+            colorsToGet.push(message);
+            await sleep(5000);
+            continue;
+        }
 
         if (json.sender === UserStore.getCurrentUser().id) {
             ownMembers.add(authorId);
