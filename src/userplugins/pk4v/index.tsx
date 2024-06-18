@@ -110,9 +110,11 @@ export default definePlugin({
         } else return 0; // 0 is bot tag id
     },
 
-    renderUsername: ({ author, message }) => useAwaiter(async () => {
+    renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
-        if (!isPkProxiedMessage(msg) || settings.store.colorMode === "None") return <>{author?.nick}</>;
+
+        if (!isPkProxiedMessage(msg) || settings.store.colorMode === "None")
+            return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
         const authorId = getAuthorIdentifier(msg);
 
@@ -125,8 +127,11 @@ export default definePlugin({
             c = colors[authorId];
         }
 
-        return <span style={{ color: c.color }}>{author.nick}</span>;
-    }, { fallbackValue: <>{author?.nick}</> }),
+        return <span style={{ color: c.color }}>
+            {withMentionPrefix ? "@" : ""}{author.nick}
+        </span>;
+
+    }, { fallbackValue: <>{withMentionPrefix ? "@" : ""}{author?.nick}</> }),
 
 
     start() {
