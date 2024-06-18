@@ -12,6 +12,7 @@ import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
+import { Message } from "discord-types/general";
 
 
 // Inspired By:
@@ -44,6 +45,12 @@ const PLURALKIT_BOT_ID = "466378653216014359";
 // hopefully nobody else tries to pick 237
 // This Is Very Good Code :tm: /s
 const PK_BADGE_ID = 237;
+
+
+const colorsToGet = new Array<MessageInfo>();
+const ownMembers = new Set<AuthorIdentifier>();
+const colors = new Map<AuthorIdentifier, NameColor>();
+
 
 const settings = definePluginSettings({
     colorMode: {
@@ -84,7 +91,7 @@ export default definePlugin({
             }
         },
 
-        // if a message is proxied, forcibly change the tag type
+        // if a message is proxied, forcibly change the tag type to pk
         {
             find: ".isPublicSystemMessage)",
             replacement: {
@@ -113,20 +120,15 @@ export default definePlugin({
         }
     ],
 
-    isOwnMessage: message => isOwnPkMessage({ channelId: message.getChannelId(), messageId: message.id })
-        || message.author.id === UserStore.getCurrentUser().id,
+    isOwnMessage: message => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
 
-
-    checkBotBadge: message => isPkProxiedMessage({ channelId: message.getChannelId(), messageId: message.id })
-        ? PK_BADGE_ID
-        : 0, // 0 is bot tag id
+    checkBotBadge: message => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
-        const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
-
-        if (!isPkProxiedMessage(msg) || settings.store.colorMode === "None")
+        if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
+        const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
         const authorId = getAuthorIdentifier(msg);
 
         let c: NameColor = colors[authorId];
@@ -151,7 +153,7 @@ export default definePlugin({
         setInterval(clearExpiredColors, 1000 * 60 * 5);
 
         addButton("PkEdit", msg => {
-            if (!msg || !isOwnPkMessage({ channelId: msg.getChannelId(), messageId: msg.id })) return null;
+            if (!msg || !isOwnPkMessage(msg)) return null;
 
             function handleClick() {
                 MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content);
@@ -169,7 +171,7 @@ export default definePlugin({
         });
 
         addButton("PkDelete", msg => {
-            if (!msg || !isOwnPkMessage({ channelId: msg.getChannelId(), messageId: msg.id })) return null;
+            if (!msg || !isOwnPkMessage(msg)) return null;
 
             function handleClick() {
                 Reactions.addReaction(msg.channel_id, msg.id, {
@@ -192,7 +194,7 @@ export default definePlugin({
 
 
         this.preEditListener = addPreEditListener((channelId, messageId, messageObj) => {
-            if (isPkProxiedMessage({ channelId, messageId })) {
+            if (isPkProxiedMessageInfo({ channelId, messageId })) {
                 const { guild_id } = ChannelStore.getChannel(channelId);
                 MessageActions.sendMessage(channelId, {
                     reaction: false,
@@ -211,11 +213,6 @@ export default definePlugin({
         removePreEditListener(this.preEditListener);
     }
 });
-
-type AuthorIdentifier = string;
-const colorsToGet = new Array<MessageInfo>();
-const ownMembers = new Set<AuthorIdentifier>();
-const colors = new Map<AuthorIdentifier, NameColor>();
 
 // this loops forever, getting colors as fast as we can without running
 // into the pk api ratelimit of 2 requests per second
@@ -285,14 +282,24 @@ async function clearExpiredColors() {
 }
 
 
-function isPkProxiedMessage(message: MessageInfo): boolean {
+// bunch of utility methods
+// is there a better way to do overloads with typescript?
+function isPkProxiedMessageInfo(message: MessageInfo): boolean {
     const msg = MessageStore.getMessage(message.channelId, message.messageId); // monosodium glutamate
-    return msg && msg.applicationId === PLURALKIT_BOT_ID && msg.webhookId !== undefined;
+    return isPkProxiedMessage(msg);
 }
 
-function isOwnPkMessage(message: MessageInfo): boolean {
-    if (!isPkProxiedMessage(message)) return false;
+function isOwnPkMessageInfo(message: MessageInfo): boolean {
+    if (!isPkProxiedMessageInfo(message)) return false;
     return ownMembers.has(getAuthorIdentifier(message));
+}
+
+function isOwnPkMessage(message: Message): boolean {
+    return isOwnPkMessageInfo({ channelId: message.getChannelId(), messageId: message.id });
+}
+
+function isPkProxiedMessage(message: Message): boolean {
+    return message && message.applicationId === PLURALKIT_BOT_ID && message.webhookId !== undefined;
 }
 
 async function sleep(millis: number) {
@@ -307,6 +314,7 @@ function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier {
     return msg.author.username + msg.author.avatar + msg.channel_id;
 }
 
+type AuthorIdentifier = string;
 
 type NameColor = {
     expires: number;
