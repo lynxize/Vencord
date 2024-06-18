@@ -29,7 +29,6 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore
 
 // Known Issues:
 // - pk edit button doesn't quite match normal discord
-// - up arrow to edit most recent message doesn't work
 // - seems to conflict with showMeYourName, which makes sense because the patch is basically the same
 // - conflicts with moreUserTags in that moreUserTags overwrites the "PK" tag with "WEBHOOK"
 
@@ -102,13 +101,25 @@ export default definePlugin({
                 replace: "case "+PK_BADGE_ID+":$2=\"PK\";break;case $1.BotTagTypes.SERVER:$2="
             }
         },
+        // make up arrow to edit most recent message work
+        // this might conflict with messageLogger, but to be honest, if you're
+        // using that plugin, you'll have enough problems with pk already
+        {
+            find: "getLastEditableMessage",
+            replacement: {
+                match: /return (.)\(\)\(this.getMessages\((.)\).{10,100}:.\.id\)/,
+                replace: "return $1()(this.getMessages($2).toArray()).reverse().find(msg => $self.isOwnMessage(msg)"
+            }
+        }
     ],
 
-    checkBotBadge: message => {
-        if (isPkProxiedMessage({ channelId: message.getChannelId(), messageId: message.id })) {
-            return PK_BADGE_ID;
-        } else return 0; // 0 is bot tag id
-    },
+    isOwnMessage: message => isOwnPkMessage({ channelId: message.getChannelId(), messageId: message.id })
+        || message.author.id === UserStore.getCurrentUser().id,
+
+
+    checkBotBadge: message => isPkProxiedMessage({ channelId: message.getChannelId(), messageId: message.id })
+        ? PK_BADGE_ID
+        : 0, // 0 is bot tag id
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
