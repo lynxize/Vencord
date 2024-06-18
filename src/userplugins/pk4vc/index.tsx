@@ -8,11 +8,13 @@ import { addPreEditListener, removePreEditListener } from "@api/MessageEvents";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { definePluginSettings } from "@api/Settings";
 import { DeleteIcon } from "@components/Icons";
+import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { findByPropsLazy } from "@webpack";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 import { Message } from "discord-types/general";
+
 import { hexToHSL, hslToHex } from "./color";
 
 
@@ -51,6 +53,7 @@ const colorsToGet = new Array<MessageInfo>();
 const ownMembers = new Set<AuthorIdentifier>();
 const colors = new Map<AuthorIdentifier, NameColor>();
 
+const logger = new Logger("PluralKitIntegration");
 
 const settings = definePluginSettings({
     colorMode: {
@@ -138,7 +141,7 @@ export default definePlugin({
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
-        const authorId = getAuthorIdentifier(msg);
+        const authorId = getAuthorIdentifier(msg)!!;
 
         let c: NameColor = colors[authorId];
         if (!c || c.expires < Date.now()) colorsToGet.push(msg);
@@ -236,6 +239,10 @@ async function fetchColors() {
         const message = colorsToGet.pop()!!;
         const authorId = getAuthorIdentifier(message);
 
+        // something went wrong... this happens so rarely in practice that its not worth handling
+        // the point is to not stop this loop, and I don't want to wrap the whole thing in a try block
+        if(!authorId) continue;
+
         const existing = colors[authorId];
         if (existing && existing.expires > Date.now()) continue; // unexpired one exists, skip
 
@@ -286,12 +293,15 @@ async function fetchColors() {
 // Every once in a while we need to get rid of expired color entries
 // just to prevent them growing infinitely
 async function clearExpiredColors() {
+    let num = 0;
     const now = Date.now();
     for (const authorId in colors.keys()) {
         if (colors[authorId].expires < now) {
             colors.delete(authorId);
+            num++;
         }
     }
+    logger.info("Cleared " + num + " expired colors");
 }
 
 
@@ -304,7 +314,7 @@ function isPkProxiedMessageInfo(message: MessageInfo): boolean {
 
 function isOwnPkMessageInfo(message: MessageInfo): boolean {
     if (!isPkProxiedMessageInfo(message)) return false;
-    return ownMembers.has(getAuthorIdentifier(message));
+    return ownMembers.has(getAuthorIdentifier(message)!!);
 }
 
 function isOwnPkMessage(message: Message): boolean {
@@ -322,8 +332,12 @@ async function sleep(millis: number) {
 // provides a way to differentiate between pk users without touching the pk api
 // includes channel id so that the same member in different servers isn't considered to be the same
 // since the account's role color might be different
-function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier {
+function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier | null {
     const msg = MessageStore.getMessage(message.channelId, message.messageId);
+    if (msg == null) {
+        logger.warn("Got no author id from " + message);
+        return null;
+    }
     return msg.author.username + msg.author.avatar + msg.channel_id;
 }
 
@@ -342,7 +356,7 @@ type MessageInfo = {
 const EditIcon = () => {
     return <svg role="img" width="18" height="18" fill="none" viewBox="0 0 24 24">
         <path fill="currentColor"
-              d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
+            d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
     </svg>;
 };
 
