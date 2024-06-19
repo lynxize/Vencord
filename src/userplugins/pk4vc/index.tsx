@@ -7,12 +7,16 @@
 import { addPreEditListener, removePreEditListener } from "@api/MessageEvents";
 import { addButton, removeButton } from "@api/MessagePopover";
 import { definePluginSettings } from "@api/Settings";
-import { DeleteIcon } from "@components/Icons";
 import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import { findByPropsLazy } from "@webpack";
-import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
+import {
+    ChannelStore,
+    GuildMemberStore,
+    MessageActions,
+    MessageStore,
+    UserStore
+} from "@webpack/common";
 import { Message } from "discord-types/general";
 
 import { hexToHSL, hslToHex } from "./color";
@@ -39,6 +43,7 @@ import { hexToHSL, hslToHex } from "./color";
 // Future Ideas:
 // - Maybe make clicking on profiles work? Not sure if it's possible
 // - Delete message confirmation modal + shift to skip (to match normal messages)
+// - Delete button (removed since findByPropsLazy died and I couldn't figure it out)
 
 const PLURALKIT_BOT_ID = "466378653216014359";
 
@@ -96,7 +101,7 @@ export default definePlugin({
     patches: [
         {
             // from showMeYourName plugin // todo: find a way to do this without conflicting
-            find: ".useCanSeeRemixBadge)",
+            find: '?"@":"")',
             replacement: {
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
                 replace: "$self.renderUsername(arguments[0])}"
@@ -105,19 +110,19 @@ export default definePlugin({
 
         // if a message is proxied, forcibly change the tag type to pk
         {
-            find: ".isPublicSystemMessage)",
+            find: "isSystemDM())?",
             replacement: {
-                match: /\.default\)\((.)\)\?(.{0,200}).\.default\.Types\.BOT/,
-                replace: ".default)($1)?$2$self.checkBotBadge($1)"
+                match: /null!=(.)&&\(0,(.{0,200})\.bot\)\?(.)=.\..\.Types.BOT/,
+                replace: "null!=$1&&(0,$2.bot)?$3=$self.checkBotBadge($1)"
             }
         },
 
         // displays the injected tag type as "PK"
         {
-            find: "BotTagTypes.SERVER:",
+            find: "DISCORD_SYSTEM_MESSAGE_BOT_TAG_TOOLTIP_OFFICIAL,",
             replacement: {
-                match: /case (.)\.BotTagTypes\.SERVER:(.)=/,
-                replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.BotTagTypes.SERVER:$2="
+                match: /case (.\..{0,5})\.SERVER:(.)=/,
+                replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
             }
         },
         // make up arrow to edit most recent message work
@@ -160,7 +165,6 @@ export default definePlugin({
 
 
     start() {
-
         fetchColors();
         setInterval(clearExpiredColors, 1000 * 60 * 5);
 
@@ -182,29 +186,6 @@ export default definePlugin({
             };
         });
 
-        addButton("PkDelete", msg => {
-            if (!msg || !isOwnPkMessage(msg)) return null;
-
-            function handleClick() {
-                Reactions.addReaction(msg.channel_id, msg.id, {
-                    id: undefined,
-                    name: "❌",
-                    animated: false
-                });
-            }
-
-            return {
-                label: "Delete (PK)",
-                icon: DeleteIcon,
-                message: msg,
-                channel: ChannelStore.getChannel(msg.channel_id),
-                onClick: handleClick,
-                onContextMenu: _ => {
-                }
-            };
-        });
-
-
         this.preEditListener = addPreEditListener((channelId, messageId, messageObj) => {
             if (isPkProxiedMessageInfo({ channelId, messageId })) {
                 const { guild_id } = ChannelStore.getChannel(channelId);
@@ -221,7 +202,6 @@ export default definePlugin({
 
     stop() {
         removeButton("PkEdit");
-        removeButton("PkDelete");
         removePreEditListener(this.preEditListener);
     }
 });
@@ -359,5 +339,3 @@ const EditIcon = () => {
             d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
     </svg>;
 };
-
-const Reactions = findByPropsLazy("addReaction");
