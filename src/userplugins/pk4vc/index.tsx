@@ -31,7 +31,6 @@ import { hexToHSL, hslToHex } from "./color";
 
 // Features:
 // - Adds an edit button to proxied messages, allowing them to be edited like normal
-// - Adds a delete button to proxied messages
 // - Optionally colors member names with either member color, system color, or account role color
 // - Replaces the "APP" (formerly "BOT") tag with "PK"
 
@@ -57,6 +56,8 @@ const PK_BADGE_ID = 237;
 const colorsToGet = new Array<MessageInfo>();
 const ownMembers = new Set<AuthorIdentifier>();
 const colors = new Map<AuthorIdentifier, NameColor>();
+
+const pkMembers = new Map<string, string>();
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -134,8 +135,33 @@ export default definePlugin({
                 match: /return (.)\(\)\(this.getMessages\((.)\).{10,100}:.\.id\)/,
                 replace: "return $1()(this.getMessages($2).toArray()).reverse().find(msg => $self.isOwnMessage(msg)"
             }
+        },
+        {
+            find: "userPanelInnerThemed)",
+            replacement: {
+                match: /forwardRef\(function\((.),(.)\){/,
+                replace: "forwardRef(function($1,$2){$1=$self.inject($1);"
+            }
         }
     ],
+
+    inject: stuff => {
+        console.log(stuff);
+        const { user } = stuff;
+        const { displayProfile } = stuff;
+
+        const member = pkMembers[user.avatar + user.username];
+        if(!member) return stuff;
+
+        user.bot = false;
+        user.discriminator = "0";
+        displayProfile.bio = member.description;
+        displayProfile.pronouns = member.pronouns;
+
+        stuff.user = user;
+        stuff.displayProfile = displayProfile;
+        return stuff;
+    },
 
     isOwnMessage: message => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
 
@@ -216,8 +242,11 @@ async function fetchColors() {
             await sleep(200);
             continue;
         }
-        const message = colorsToGet.pop()!!;
-        const authorId = getAuthorIdentifier(message);
+
+        // todo: why do we have both a message and a messageinfo, that's redundant
+        const messageInfo = colorsToGet.pop()!!;
+        const message = MessageStore.getMessage(messageInfo.channelId, messageInfo.messageId);
+        const authorId = getAuthorIdentifier(messageInfo);
 
         // something went wrong... this happens so rarely in practice that its not worth handling
         // the point is to not stop this loop, and I don't want to wrap the whole thing in a try block
@@ -228,12 +257,12 @@ async function fetchColors() {
 
         let json: any;
         try {
-            const request = await fetch("https://api.pluralkit.me/v2/messages/" + message.messageId);
+            const request = await fetch("https://api.pluralkit.me/v2/messages/" + messageInfo.messageId);
             json = await request.json();
         } catch (e) {
             console.log(e);
             // wait a bit before trying again
-            colorsToGet.push(message);
+            colorsToGet.push(messageInfo);
             await sleep(5000);
             continue;
         }
@@ -242,6 +271,9 @@ async function fetchColors() {
             ownMembers.add(authorId);
         }
 
+        // fixme: cursedness (temporary)
+        pkMembers[message.author.avatar + message.author.username] = json.member;
+
         const { colorMode } = settings.store;
         let color = "#666666"; // placeholder color
 
@@ -249,7 +281,7 @@ async function fetchColors() {
         else if (colorMode === "System") color = "#" + json.system?.color;
         else if (colorMode === "Account") {
             const account = GuildMemberStore.getMember(
-                ChannelStore.getChannel(message.channelId).getGuildId(),
+                ChannelStore.getChannel(messageInfo.channelId).getGuildId(),
                 json.sender
             );
             color = account?.colorString;
