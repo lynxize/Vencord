@@ -10,14 +10,9 @@ import { definePluginSettings } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import {
-    ChannelStore,
-    GuildMemberStore,
-    MessageActions,
-    MessageStore,
-    UserStore
-} from "@webpack/common";
+import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 import { Message } from "discord-types/general";
+import { User } from "discord-types/general/index.js";
 
 import { hexToHSL, hslToHex } from "./color";
 
@@ -33,16 +28,19 @@ import { hexToHSL, hslToHex } from "./color";
 // - Adds an edit button to proxied messages, allowing them to be edited like normal
 // - Optionally colors member names with either member color, system color, or account role color
 // - Replaces the "APP" (formerly "BOT") tag with "PK"
+// - Adds some member info to the popup profile
 
 // Known Issues:
 // - pk edit button doesn't quite match normal discord
 // - seems to conflict with showMeYourName, which makes sense because the patch is basically the same
 // - conflicts with moreUserTags in that moreUserTags overwrites the "PK" tag with "WEBHOOK"
+// - profile popups still have an "add notes" box that doesn't work
+// - "APP" tag is still shown in profile popups
 
 // Future Ideas:
-// - Maybe make clicking on profiles work? Not sure if it's possible
 // - Delete message confirmation modal + shift to skip (to match normal messages)
 // - Delete button (removed since findByPropsLazy died and I couldn't figure it out)
+// - Improve member popup (add more info, "APP" -> "PK")
 
 const PLURALKIT_BOT_ID = "466378653216014359";
 
@@ -57,7 +55,8 @@ const colorsToGet = new Array<MessageInfo>();
 const ownMembers = new Set<AuthorIdentifier>();
 const colors = new Map<AuthorIdentifier, NameColor>();
 
-const pkMembers = new Map<string, string>();
+// todo: currently this can grow infinitely and is never trimmed
+const pkMembers = new Map<MemberIdentifier, any>();
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -136,32 +135,47 @@ export default definePlugin({
                 replace: "return $1()(this.getMessages($2).toArray()).reverse().find(msg => $self.isOwnMessage(msg)"
             }
         },
+
+        // don't treat profile popups as webhook popups (as in, do show fields like bio)
         {
-            find: "userPanelInnerThemed)",
+            find: ".USER_PROFILE}};return",
             replacement: {
-                match: /forwardRef\(function\((.),(.)\){/,
-                replace: "forwardRef(function($1,$2){$1=$self.inject($1);"
+                match: /return null;if\((.)\.isNonUserBot\(\)\)/,
+                replace: "return null;if($1.isNonUserBot()&&!$self.isPluralKitProfile($1))"
             }
-        }
+        },
+        // set pronouns
+        {
+            find: ".USER_PROFILE}};return",
+            replacement: {
+                match: /usernameSection,user:(.),nickname:(.{1,2}),pronouns:null==(.)\?void 0:.\.pronouns,usernameIcon:/,
+                replace: "usernameSection,user:$1,nickname:$self.isPluralKitProfile($1)?null:$2,pronouns:$self.getPluralKitPronouns($1, $3),usernameIcon:"
+            }
+        },
+        // set bio
+        {
+            find: ".USER_PROFILE}};return",
+            replacement: {
+                match: /\{user:(.),guildId:(.{20,200})bio:null==(.)\?void 0:.\.bio,guild:/,
+                replace: "{user:$1,guildId:$2bio:$self.getPluralKitBio($1,$3),guild:"
+            }
+        },
+        // disable the "add notes" box
+        // this doesn't work, see betterNotes for a way to actually do this
+        /*
+        {
+            find: ".USER_PROFILE}};return",
+            replacement: {
+                match: /user:(.),(.{10,100}),hideNote:/,
+                replace: "user:$1,$2,hideNote:$self.isPluralKitProfile($1)?false:"
+            },
+        },
+         */
     ],
 
-    inject: stuff => {
-        console.log(stuff);
-        const { user } = stuff;
-        const { displayProfile } = stuff;
-
-        const member = pkMembers[user.avatar + user.username];
-        if(!member) return stuff;
-
-        user.bot = false;
-        user.discriminator = "0";
-        displayProfile.bio = member.description;
-        displayProfile.pronouns = member.pronouns;
-
-        stuff.user = user;
-        stuff.displayProfile = displayProfile;
-        return stuff;
-    },
+    isPluralKitProfile: (user: User) => pkMembers[getPkMemberIdentifier(user)] != null,
+    getPluralKitPronouns: (user: User, idfk) => pkMembers[getPkMemberIdentifier(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
+    getPluralKitBio: (user: User, idfk) => pkMembers[getPkMemberIdentifier(user)]?.description ?? idfk?.bio ?? void 0,
 
     isOwnMessage: message => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
 
@@ -173,7 +187,6 @@ export default definePlugin({
 
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
         const authorId = getAuthorIdentifier(msg)!!;
-
         let c: NameColor = colors[authorId];
         if (!c || c.expires < Date.now()) colorsToGet.push(msg);
 
@@ -272,7 +285,7 @@ async function fetchColors() {
         }
 
         // fixme: cursedness (temporary)
-        pkMembers[message.author.avatar + message.author.username] = json.member;
+        pkMembers[getPkMemberIdentifier(message.author)] = json.member;
 
         const { colorMode } = settings.store;
         let color = "#666666"; // placeholder color
@@ -353,7 +366,13 @@ function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier | null {
     return msg.author.username + msg.author.avatar + msg.channel_id;
 }
 
+// this does return a perfectly valid thing for non-pk users so be careful
+function getPkMemberIdentifier(user: User): MemberIdentifier {
+    return user.username + user.avatar;
+}
+
 type AuthorIdentifier = string;
+type MemberIdentifier = string;
 
 type NameColor = {
     expires: number;

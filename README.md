@@ -19,8 +19,9 @@ Installation instructions can be found [here](https://github.com/Vendicated/Venc
 [PluralKit](https://pluralkit.me/) integration, inspired by [PluralChum](https://github.com/estroBiologist/pluralchum) and [this earlier Vencord plugin](https://github.com/Vendicated/Vencord/pull/2536/).
 
 - Adds edit and delete buttons to proxied messages
+- Replaces the annoying `APP` (formerly `BOT`) tag with `PK`
+- Makes the profile popup display pronouns and description instead of just the name
 - Optionally allows coloring of member names in chat by either member color, system color, or highest account role color
-- Replaces the annoying`APP` (formerly `BOT`) tag with `PK`
 
 (see [the plugin itself](src/userplugins/pk4vc/index.tsx) for known issues and more information)
 
