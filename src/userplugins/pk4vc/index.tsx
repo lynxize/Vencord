@@ -26,9 +26,9 @@ import { hexToHSL, hslToHex } from "./color";
 
 // Features:
 // - Adds an edit button to proxied messages, allowing them to be edited like normal
-// - Optionally colors member names with either member color, system color, or account role color
+// - Colors member names with either member color, system color, or account role color
 // - Replaces the "APP" (formerly "BOT") tag with "PK"
-// - Adds some member info to the popup profile
+// - Adds some member info to the profile popup
 
 // Known Issues:
 // - pk edit button doesn't quite match normal discord
@@ -39,7 +39,8 @@ import { hexToHSL, hslToHex } from "./color";
 
 // Future Ideas:
 // - Delete message confirmation modal + shift to skip (to match normal messages)
-// - Delete button (removed since findByPropsLazy died and I couldn't figure it out)
+// - Re-add delete button (removed since findByPropsLazy died and I couldn't figure it out)
+// - Re-add "none" color mode
 // - Improve member popup (add more info, "APP" -> "PK")
 
 const PLURALKIT_BOT_ID = "466378653216014359";
@@ -54,9 +55,7 @@ const PK_BADGE_ID = 237;
 const colorsToGet = new Array<MessageInfo>();
 const ownMembers = new Set<AuthorIdentifier>();
 const colors = new Map<AuthorIdentifier, NameColor>();
-
-// todo: currently this can grow infinitely and is never trimmed
-const pkMembers = new Map<MemberIdentifier, any>();
+const pkMemberInfo = new Map<MemberIdentifier, any>(); // pk member objects
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -68,7 +67,7 @@ const settings = definePluginSettings({
             { label: "Color by account role color", value: "Account", default: true },
             { label: "Color by member color", value: "Member" },
             { label: "Color by system color", value: "System" },
-            { label: "No color", value: "None" }
+            // { label: "No color", value: "None" } // disabled since it breaks member profiles because of my own bad code
         ],
         restartNeeded: true, // to update previously rendered names
         onChange(_: any) {
@@ -83,10 +82,23 @@ const settings = definePluginSettings({
         onChange(newValue: any) {
             colors.clear();
         }
+    },
+    enableTag: {
+        description: "Replace \"APP\" tag with \"PK\" (conflicts with MoreUserTags)",
+        type: OptionType.BOOLEAN,
+        default: true,
+        restartNeeded: true
+    },
+    enableMemberProfiles: {
+        description: "(EXPERIMENTAL/BUGGY) Show PluralKit member info in profile popups",
+        type: OptionType.BOOLEAN,
+        default: false,
+        restartNeeded: true
     }
 });
 
 
+// noinspection JSUnusedGlobalSymbols
 export default definePlugin({
     settings,
     name: "PluralKit Integration",
@@ -100,29 +112,11 @@ export default definePlugin({
     ],
     patches: [
         {
-            // from showMeYourName plugin // todo: find a way to do this without conflicting
+            // from showMeYourName plugin // todo: conflicts
             find: '?"@":"")',
             replacement: {
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
                 replace: "$self.renderUsername(arguments[0])}"
-            }
-        },
-
-        // if a message is proxied, forcibly change the tag type to pk
-        {
-            find: "isSystemDM())?",
-            replacement: {
-                match: /null!=(.)&&\(0,(.{0,200})\.bot\)\?(.)=.\..\.Types.BOT/,
-                replace: "null!=$1&&(0,$2.bot)?$3=$self.checkBotBadge($1)"
-            }
-        },
-
-        // displays the injected tag type as "PK"
-        {
-            find: "DISCORD_SYSTEM_MESSAGE_BOT_TAG_TOOLTIP_OFFICIAL,",
-            replacement: {
-                match: /case (.\..{0,5})\.SERVER:(.)=/,
-                replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
             }
         },
         // make up arrow to edit most recent message work
@@ -135,9 +129,27 @@ export default definePlugin({
                 replace: "return $1()(this.getMessages($2).toArray()).reverse().find(msg => $self.isOwnMessage(msg)"
             }
         },
-
+        // if a message is proxied, forcibly change the tag type to pk
+        {
+            predicate: () => settings.store.enableTag,
+            find: "isSystemDM())?",
+            replacement: {
+                match: /null!=(.)&&\(0,(.{0,200})\.bot\)\?(.)=.\..\.Types.BOT/,
+                replace: "null!=$1&&(0,$2.bot)?$3=$self.changeBotBadge($1)"
+            }
+        },
+        // displays the injected tag type as "PK"
+        {
+            predicate: () => settings.store.enableTag,
+            find: "DISCORD_SYSTEM_MESSAGE_BOT_TAG_TOOLTIP_OFFICIAL,",
+            replacement: {
+                match: /case (.\..{0,5})\.SERVER:(.)=/,
+                replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
+            }
+        },
         // don't treat profile popups as webhook popups (as in, do show fields like bio)
         {
+            predicate: () => settings.store.enableMemberProfiles,
             find: ".USER_PROFILE}};return",
             replacement: {
                 match: /return null;if\((.)\.isNonUserBot\(\)\)/,
@@ -146,6 +158,7 @@ export default definePlugin({
         },
         // set pronouns
         {
+            predicate: () => settings.store.enableMemberProfiles,
             find: ".USER_PROFILE}};return",
             replacement: {
                 match: /usernameSection,user:(.),nickname:(.{1,2}),pronouns:null==(.)\?void 0:.\.pronouns,usernameIcon:/,
@@ -154,32 +167,20 @@ export default definePlugin({
         },
         // set bio
         {
+            predicate: () => settings.store.enableMemberProfiles,
             find: ".USER_PROFILE}};return",
             replacement: {
                 match: /\{user:(.),guildId:(.{20,200})bio:null==(.)\?void 0:.\.bio,guild:/,
                 replace: "{user:$1,guildId:$2bio:$self.getPluralKitBio($1,$3),guild:"
             }
         },
-        // disable the "add notes" box
-        // this doesn't work, see betterNotes for a way to actually do this
-        /*
-        {
-            find: ".USER_PROFILE}};return",
-            replacement: {
-                match: /user:(.),(.{10,100}),hideNote:/,
-                replace: "user:$1,$2,hideNote:$self.isPluralKitProfile($1)?false:"
-            },
-        },
-         */
     ],
 
-    isPluralKitProfile: (user: User) => pkMembers[getPkMemberIdentifier(user)] != null,
-    getPluralKitPronouns: (user: User, idfk) => pkMembers[getPkMemberIdentifier(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
-    getPluralKitBio: (user: User, idfk) => pkMembers[getPkMemberIdentifier(user)]?.description ?? idfk?.bio ?? void 0,
-
-    isOwnMessage: message => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
-
-    checkBotBadge: message => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
+    changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
+    isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberIdentifier(user)] != null,
+    isOwnMessage: (message: Message) => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
+    getPluralKitPronouns: (user: User, idfk) => pkMemberInfo[getPkMemberIdentifier(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
+    getPluralKitBio: (user: User, idfk) => pkMemberInfo[getPkMemberIdentifier(user)]?.description ?? idfk?.bio ?? void 0,
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
@@ -187,16 +188,16 @@ export default definePlugin({
 
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
         const authorId = getAuthorIdentifier(msg)!!;
-        let c: NameColor = colors[authorId];
-        if (!c || c.expires < Date.now()) colorsToGet.push(msg);
+        let color: NameColor = colors[authorId];
+        if (!color || color.expires < Date.now()) colorsToGet.push(msg);
 
-        while (!c) {
+        while (!color) {
             // wait around until it gets around to fetching the color we want
             await sleep(500);
-            c = colors[authorId];
+            color = colors[authorId];
         }
 
-        return <span style={{ color: c.color }}>
+        return <span style={{ color: color.color }}>
             {withMentionPrefix ? "@" : ""}{author.nick}
         </span>;
 
@@ -209,24 +210,19 @@ export default definePlugin({
 
         addButton("PkEdit", msg => {
             if (!msg || !isOwnPkMessage(msg)) return null;
-
-            function handleClick() {
-                MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content);
-            }
-
-            return {
+            else return {
                 label: "Edit (PK)",
                 icon: EditIcon,
                 message: msg,
                 channel: ChannelStore.getChannel(msg.channel_id),
-                onClick: handleClick,
+                onClick: () => MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content),
                 onContextMenu: _ => {
                 }
             };
         });
 
         this.preEditListener = addPreEditListener((channelId, messageId, messageObj) => {
-            if (isPkProxiedMessageInfo({ channelId, messageId })) {
+            if (isPkProxiedMessage({ channelId, messageId })) {
                 const { guild_id } = ChannelStore.getChannel(channelId);
                 MessageActions.sendMessage(channelId, {
                     reaction: false,
@@ -252,13 +248,11 @@ async function fetchColors() {
     // noinspection InfiniteLoopJS
     while (true) {
         if (colorsToGet.length === 0) {
-            await sleep(200);
+            await sleep(500);
             continue;
         }
 
-        // todo: why do we have both a message and a messageinfo, that's redundant
         const messageInfo = colorsToGet.pop()!!;
-        const message = MessageStore.getMessage(messageInfo.channelId, messageInfo.messageId);
         const authorId = getAuthorIdentifier(messageInfo);
 
         // something went wrong... this happens so rarely in practice that its not worth handling
@@ -280,14 +274,7 @@ async function fetchColors() {
             continue;
         }
 
-        if (json.sender === UserStore.getCurrentUser().id) {
-            ownMembers.add(authorId);
-        }
-
-        // fixme: cursedness (temporary)
-        pkMembers[getPkMemberIdentifier(message.author)] = json.member;
-
-        const { colorMode } = settings.store;
+        const { colorMode, readableColors } = settings.store;
         let color = "#666666"; // placeholder color
 
         if (colorMode === "Member") color = "#" + json.member?.color;
@@ -297,10 +284,11 @@ async function fetchColors() {
                 ChannelStore.getChannel(messageInfo.channelId).getGuildId(),
                 json.sender
             );
-            color = account?.colorString;
+            color = account?.colorString ?? color;
         }
 
-        if (settings.store.readableColors && (colorMode === "Member" || colorMode === "System")) {
+        if (readableColors && (colorMode === "Member" || colorMode === "System")) {
+            // todo: this assumes a dark theme
             const [h, s, l] = hexToHSL(color);
             color = hslToHex([h, s, Math.max(l, 70)]);
         }
@@ -309,6 +297,8 @@ async function fetchColors() {
             color: color,
             expires: Date.now() + 120 * 1000,
         }; // expires two minutes from now
+        pkMemberInfo[getPkMemberIdentifierFromAuthorIdentifier(authorId)] = json.member;
+        if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
 
         await sleep(500); // we don't want to do more than 2 requests per second
     }
@@ -323,6 +313,7 @@ async function clearExpiredColors() {
     for (const authorId in colors.keys()) {
         if (colors[authorId].expires < now) {
             colors.delete(authorId);
+            pkMemberInfo.delete(getPkMemberIdentifierFromAuthorIdentifier(authorId)); // also remove from saved pk members
             num++;
         }
     }
@@ -330,24 +321,17 @@ async function clearExpiredColors() {
 }
 
 
-// bunch of utility methods
-// is there a better way to do overloads with typescript?
-function isPkProxiedMessageInfo(message: MessageInfo): boolean {
-    const msg = MessageStore.getMessage(message.channelId, message.messageId); // monosodium glutamate
-    return isPkProxiedMessage(msg);
-}
-
-function isOwnPkMessageInfo(message: MessageInfo): boolean {
-    if (!isPkProxiedMessageInfo(message)) return false;
+function isOwnPkMessage(message: Message | MessageInfo): boolean {
+    if (message instanceof Message) message = { channelId: message.getChannelId(), messageId: message.id };
     return ownMembers.has(getAuthorIdentifier(message)!!);
 }
 
-function isOwnPkMessage(message: Message): boolean {
-    return isOwnPkMessageInfo({ channelId: message.getChannelId(), messageId: message.id });
-}
+function isPkProxiedMessage(message: Message | MessageInfo): boolean {
+    let msg: Message; // monosodium glutamate
+    if (message instanceof Message) msg = message;
+    else msg = MessageStore.getMessage(message.channelId, message.messageId);
 
-function isPkProxiedMessage(message: Message): boolean {
-    return message && message.applicationId === PLURALKIT_BOT_ID && message.webhookId !== undefined;
+    return msg && msg.applicationId === PLURALKIT_BOT_ID && msg.webhookId !== undefined;
 }
 
 async function sleep(millis: number) {
@@ -363,12 +347,20 @@ function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier | null {
         logger.warn("Got no author id from " + message);
         return null;
     }
-    return msg.author.username + msg.author.avatar + msg.channel_id;
+    return msg.author.username + msg.author.avatar + " " + msg.channel_id;
 }
 
 // this does return a perfectly valid thing for non-pk users so be careful
+// like the author id but without the channel id
 function getPkMemberIdentifier(user: User): MemberIdentifier {
     return user.username + user.avatar;
+}
+
+// iLoveExcessivelyLongFunctionNamesThatAreAPainToReadAndUnderstand
+function getPkMemberIdentifierFromAuthorIdentifier(author: AuthorIdentifier): MemberIdentifier {
+    const a = author.split(" ");
+    a.pop(); // removes channel id
+    return a.join(" ");
 }
 
 type AuthorIdentifier = string;
