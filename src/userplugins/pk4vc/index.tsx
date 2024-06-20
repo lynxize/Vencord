@@ -53,9 +53,9 @@ const PK_BADGE_ID = 237;
 
 
 const colorsToGet = new Array<MessageInfo>();
-const ownMembers = new Set<AuthorIdentifier>();
-const colors = new Map<AuthorIdentifier, NameColor>();
-const pkMemberInfo = new Map<MemberIdentifier, any>(); // pk member objects
+const ownMembers = new Set<AuthorID>();
+const colors = new Map<AuthorID, NameColor>();
+const pkMemberInfo = new Map<MemberID, any>(); // pk member objects
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -111,8 +111,9 @@ export default definePlugin({
         }
     ],
     patches: [
+        // color usernames in chat
         {
-            // from showMeYourName plugin // todo: conflicts
+            // todo: conflicts with showMeYourName
             find: '?"@":"")',
             replacement: {
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
@@ -147,7 +148,17 @@ export default definePlugin({
                 replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
             }
         },
-        // don't treat profile popups as webhook popups (as in, do show fields like bio)
+
+        // I'm not sure if this is the best way to modify the profile popup...
+        // I tried modifying the user object directly, but since that seems to be shared between all pk users
+        // in a channel (I think it's for the webhook) setting properties on it breaks some things
+        // (all members would have the same username if you leave and come back to a channel, etc.)
+        //
+        // Also tried creating a fully custom user object, but that was Hard(:tm:) because I don't really understand JS.
+        //
+        // I'm not sure what the "proper" place to hook into is, but this works, and that's what matters.
+
+        // don't treat profile popups as webhook popups (as in, *do* show fields like bio)
         {
             predicate: () => settings.store.enableMemberProfiles,
             find: ".USER_PROFILE}};return",
@@ -177,17 +188,17 @@ export default definePlugin({
     ],
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
-    isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberIdentifier(user)] != null,
+    isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberID(user)] != null,
     isOwnMessage: (message: Message) => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
-    getPluralKitPronouns: (user: User, idfk) => pkMemberInfo[getPkMemberIdentifier(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
-    getPluralKitBio: (user: User, idfk) => pkMemberInfo[getPkMemberIdentifier(user)]?.description ?? idfk?.bio ?? void 0,
+    getPluralKitPronouns: (user: User, idfk) => pkMemberInfo[getPkMemberID(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
+    getPluralKitBio: (user: User, idfk) => pkMemberInfo[getPkMemberID(user)]?.description ?? idfk?.bio ?? void 0,
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
         const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
-        const authorId = getAuthorIdentifier(msg)!!;
+        const authorId = getAuthorID(msg)!!;
         let color: NameColor = colors[authorId];
         if (!color || color.expires < Date.now()) colorsToGet.push(msg);
 
@@ -253,7 +264,7 @@ async function fetchColors() {
         }
 
         const messageInfo = colorsToGet.pop()!!;
-        const authorId = getAuthorIdentifier(messageInfo);
+        const authorId = getAuthorID(messageInfo);
 
         // something went wrong... this happens so rarely in practice that its not worth handling
         // the point is to not stop this loop, and I don't want to wrap the whole thing in a try block
@@ -297,7 +308,7 @@ async function fetchColors() {
             color: color,
             expires: Date.now() + 120 * 1000,
         }; // expires two minutes from now
-        pkMemberInfo[getPkMemberIdentifierFromAuthorIdentifier(authorId)] = json.member;
+        pkMemberInfo[getPkMemberIDFromAuthorID(authorId)] = json.member;
         if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
 
         await sleep(500); // we don't want to do more than 2 requests per second
@@ -313,7 +324,7 @@ async function clearExpiredColors() {
     for (const authorId in colors.keys()) {
         if (colors[authorId].expires < now) {
             colors.delete(authorId);
-            pkMemberInfo.delete(getPkMemberIdentifierFromAuthorIdentifier(authorId)); // also remove from saved pk members
+            pkMemberInfo.delete(getPkMemberIDFromAuthorID(authorId)); // also remove from saved pk members
             num++;
         }
     }
@@ -323,7 +334,7 @@ async function clearExpiredColors() {
 
 function isOwnPkMessage(message: Message | MessageInfo): boolean {
     if (message instanceof Message) message = { channelId: message.getChannelId(), messageId: message.id };
-    return ownMembers.has(getAuthorIdentifier(message)!!);
+    return ownMembers.has(getAuthorID(message)!!);
 }
 
 function isPkProxiedMessage(message: Message | MessageInfo): boolean {
@@ -341,7 +352,7 @@ async function sleep(millis: number) {
 // provides a way to differentiate between pk users without touching the pk api
 // includes channel id so that the same member in different servers isn't considered to be the same
 // since the account's role color might be different
-function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier | null {
+function getAuthorID(message: MessageInfo): AuthorID | null {
     const msg = MessageStore.getMessage(message.channelId, message.messageId);
     if (msg == null) {
         logger.warn("Got no author id from " + message);
@@ -352,19 +363,18 @@ function getAuthorIdentifier(message: MessageInfo): AuthorIdentifier | null {
 
 // this does return a perfectly valid thing for non-pk users so be careful
 // like the author id but without the channel id
-function getPkMemberIdentifier(user: User): MemberIdentifier {
+function getPkMemberID(user: User): MemberID {
     return user.username + user.avatar;
 }
 
-// iLoveExcessivelyLongFunctionNamesThatAreAPainToReadAndUnderstand
-function getPkMemberIdentifierFromAuthorIdentifier(author: AuthorIdentifier): MemberIdentifier {
+function getPkMemberIDFromAuthorID(author: AuthorID): MemberID {
     const a = author.split(" ");
     a.pop(); // removes channel id
     return a.join(" ");
 }
 
-type AuthorIdentifier = string;
-type MemberIdentifier = string;
+type AuthorID = string;
+type MemberID = string; // **NOT** a 5-6 char pk member id
 
 type NameColor = {
     expires: number;
