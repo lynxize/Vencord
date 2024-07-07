@@ -14,7 +14,7 @@ Installation instructions can be found [here](https://docs.vencord.dev/installin
 
 ## Plugins
 
-### pk4vc
+### PluralKitIntegration
 
 [PluralKit](https://pluralkit.me/) integration, inspired by [PluralChum](https://github.com/estroBiologist/pluralchum) and [this earlier Vencord plugin](https://github.com/Vendicated/Vencord/pull/2536/).
 
@@ -23,7 +23,7 @@ Installation instructions can be found [here](https://docs.vencord.dev/installin
 - Makes the profile popup display pronouns and description instead of just the name
 - Optionally allows coloring of member names in chat by either member color, system color, or highest account role color
 
-(see [the plugin itself](src/userplugins/pk4vc/index.tsx) for known issues and more information)
+(see [the plugin itself](src/userplugins/pluralKitIntegration/index.tsx) for known issues and more information)
 
 ### More soon?
 

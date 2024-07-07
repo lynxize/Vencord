@@ -100,7 +100,7 @@ const settings = definePluginSettings({
 // noinspection JSUnusedGlobalSymbols
 export default definePlugin({
     settings,
-    name: "PluralKit Integration",
+    name: "PluralKitIntegration",
     description: "Makes PluralKit slightly less painful to use",
     dependencies: ["MessageEventsAPI"], // is this needed?
     authors: [
