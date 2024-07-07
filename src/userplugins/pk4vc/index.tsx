@@ -11,8 +11,7 @@ import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
-import { Message } from "discord-types/general";
-import { User } from "discord-types/general/index.js";
+import type { Message, User } from "discord-types/general";
 
 import { hexToHSL, hslToHex } from "./color";
 
@@ -159,6 +158,7 @@ export default definePlugin({
         // I'm not sure what the "proper" place to hook into is, but this works, and that's what matters.
 
         // don't treat profile popups as webhook popups (as in, *do* show fields like bio)
+        /*
         {
             predicate: () => settings.store.enableMemberProfiles,
             find: ".USER_PROFILE}};return",
@@ -185,6 +185,7 @@ export default definePlugin({
                 replace: "{user:$1,guildId:$2bio:$self.getPluralKitBio($1,$3),guild:"
             }
         },
+         */
     ],
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
@@ -333,13 +334,14 @@ async function clearExpiredColors() {
 
 
 function isOwnPkMessage(message: Message | MessageInfo): boolean {
-    if (message instanceof Message) message = { channelId: message.getChannelId(), messageId: message.id };
+    if (isMessage(message)) message = { channelId: message.getChannelId(), messageId: message.id };
     return ownMembers.has(getAuthorID(message)!!);
 }
 
 function isPkProxiedMessage(message: Message | MessageInfo): boolean {
+    // I don't even need to know typescript to know this is bad typescript...
     let msg: Message; // monosodium glutamate
-    if (message instanceof Message) msg = message;
+    if (isMessage(message)) msg = message;
     else msg = MessageStore.getMessage(message.channelId, message.messageId);
 
     return msg && msg.applicationId === PLURALKIT_BOT_ID && msg.webhookId !== undefined;
@@ -348,6 +350,12 @@ function isPkProxiedMessage(message: Message | MessageInfo): boolean {
 async function sleep(millis: number) {
     await new Promise(r => setTimeout(r, millis));
 }
+
+// this feels dirty...
+// previously was using "message is Message" but that no longer works since
+// the discord-types import only works with "import type" now
+// I don't understand typescript enough to get the subtleties here
+function isMessage(msg: any): Boolean { return !msg.messageId; }
 
 // provides a way to differentiate between pk users without touching the pk api
 // includes channel id so that the same member in different servers isn't considered to be the same

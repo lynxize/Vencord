@@ -7,7 +7,7 @@ Some random unofficial plugins for [Vencord](https://github.com/Vendicated/Venco
 
 See `src/userplugins` for the plugins themselves; the rest of this repo is just Vencord with some very minor tweaks.
 
-Installation instructions can be found [here](https://github.com/Vendicated/Vencord/blob/main/docs/1_INSTALLING.md) and [here](https://github.com/Vendicated/Vencord/blob/main/docs/2_PLUGINS.md). (Put the desired plugins in the `src/userplugins/` folder of your own Vencord install)
+Installation instructions can be found [here](https://docs.vencord.dev/installing/custom-plugins/).
 
 > [!NOTE]
 > I don't recommend cloning Vencord from this repo, as I probably won't keep it super up to date
