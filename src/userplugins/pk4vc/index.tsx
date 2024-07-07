@@ -51,7 +51,7 @@ const PLURALKIT_BOT_ID = "466378653216014359";
 const PK_BADGE_ID = 237;
 
 
-const colorsToGet = new Array<MessageInfo>();
+const colorsToGet = new Array<Message>();
 const ownMembers = new Set<AuthorID>();
 const colors = new Map<AuthorID, NameColor>();
 const pkMemberInfo = new Map<MemberID, any>(); // pk member objects
@@ -198,10 +198,9 @@ export default definePlugin({
         if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
-        const msg: MessageInfo = { channelId: message.getChannelId(), messageId: message.id };
-        const authorId = getAuthorID(msg)!!;
+        const authorId = getAuthorID(message)!!;
         let color: NameColor = colors[authorId];
-        if (!color || color.expires < Date.now()) colorsToGet.push(msg);
+        if (!color || color.expires < Date.now()) colorsToGet.push(message);
 
         while (!color) {
             // wait around until it gets around to fetching the color we want
@@ -234,7 +233,7 @@ export default definePlugin({
         });
 
         this.preEditListener = addPreEditListener((channelId, messageId, messageObj) => {
-            if (isPkProxiedMessage({ channelId, messageId })) {
+            if (isPkProxiedMessage(MessageStore.getMessage(channelId, messageId))) {
                 const { guild_id } = ChannelStore.getChannel(channelId);
                 MessageActions.sendMessage(channelId, {
                     reaction: false,
@@ -276,7 +275,7 @@ async function fetchColors() {
 
         let json: any;
         try {
-            const request = await fetch("https://api.pluralkit.me/v2/messages/" + messageInfo.messageId);
+            const request = await fetch("https://api.pluralkit.me/v2/messages/" + messageInfo.id);
             json = await request.json();
         } catch (e) {
             console.log(e);
@@ -293,7 +292,7 @@ async function fetchColors() {
         else if (colorMode === "System") color = "#" + json.system?.color;
         else if (colorMode === "Account") {
             const account = GuildMemberStore.getMember(
-                ChannelStore.getChannel(messageInfo.channelId).getGuildId(),
+                ChannelStore.getChannel(messageInfo.getChannelId()).getGuildId(),
                 json.sender
             );
             color = account?.colorString ?? color;
@@ -333,40 +332,23 @@ async function clearExpiredColors() {
 }
 
 
-function isOwnPkMessage(message: Message | MessageInfo): boolean {
-    if (isMessage(message)) message = { channelId: message.getChannelId(), messageId: message.id };
+function isOwnPkMessage(message: Message): boolean {
     return ownMembers.has(getAuthorID(message)!!);
 }
 
-function isPkProxiedMessage(message: Message | MessageInfo): boolean {
-    // I don't even need to know typescript to know this is bad typescript...
-    let msg: Message; // monosodium glutamate
-    if (isMessage(message)) msg = message;
-    else msg = MessageStore.getMessage(message.channelId, message.messageId);
-
-    return msg && msg.applicationId === PLURALKIT_BOT_ID && msg.webhookId !== undefined;
+function isPkProxiedMessage(message: Message): boolean {
+    return message && message.applicationId === PLURALKIT_BOT_ID && message.webhookId !== undefined;
 }
 
 async function sleep(millis: number) {
     await new Promise(r => setTimeout(r, millis));
 }
 
-// this feels dirty...
-// previously was using "message is Message" but that no longer works since
-// the discord-types import only works with "import type" now
-// I don't understand typescript enough to get the subtleties here
-function isMessage(msg: any): Boolean { return !msg.messageId; }
-
 // provides a way to differentiate between pk users without touching the pk api
 // includes channel id so that the same member in different servers isn't considered to be the same
 // since the account's role color might be different
-function getAuthorID(message: MessageInfo): AuthorID | null {
-    const msg = MessageStore.getMessage(message.channelId, message.messageId);
-    if (msg == null) {
-        logger.warn("Got no author id from " + message);
-        return null;
-    }
-    return msg.author.username + msg.author.avatar + " " + msg.channel_id;
+function getAuthorID(message: Message): AuthorID | null {
+    return message.author.username + message.author.avatar + " " + message.getChannelId();
 }
 
 // this does return a perfectly valid thing for non-pk users so be careful
@@ -387,11 +369,6 @@ type MemberID = string; // **NOT** a 5-6 char pk member id
 type NameColor = {
     expires: number;
     color: string;
-}
-
-type MessageInfo = {
-    channelId: string,
-    messageId: string,
 }
 
 const EditIcon = () => {
