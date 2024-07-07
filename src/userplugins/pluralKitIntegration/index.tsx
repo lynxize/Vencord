@@ -78,7 +78,7 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         default: false,
         restartNeeded: true,
-        onChange(newValue: any) {
+        onChange(_: any) {
             colors.clear();
         }
     },
@@ -88,12 +88,6 @@ const settings = definePluginSettings({
         default: true,
         restartNeeded: true
     },
-    enableMemberProfiles: {
-        description: "(EXPERIMENTAL/BUGGY) Show PluralKit member info in profile popups",
-        type: OptionType.BOOLEAN,
-        default: false,
-        restartNeeded: true
-    }
 });
 
 
@@ -146,53 +140,12 @@ export default definePlugin({
                 match: /case (.\..{0,5})\.SERVER:(.)=/,
                 replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
             }
-        },
-
-        // I'm not sure if this is the best way to modify the profile popup...
-        // I tried modifying the user object directly, but since that seems to be shared between all pk users
-        // in a channel (I think it's for the webhook) setting properties on it breaks some things
-        // (all members would have the same username if you leave and come back to a channel, etc.)
-        //
-        // Also tried creating a fully custom user object, but that was Hard(:tm:) because I don't really understand JS.
-        //
-        // I'm not sure what the "proper" place to hook into is, but this works, and that's what matters.
-
-        // don't treat profile popups as webhook popups (as in, *do* show fields like bio)
-        /*
-        {
-            predicate: () => settings.store.enableMemberProfiles,
-            find: ".USER_PROFILE}};return",
-            replacement: {
-                match: /return null;if\((.)\.isNonUserBot\(\)\)/,
-                replace: "return null;if($1.isNonUserBot()&&!$self.isPluralKitProfile($1))"
-            }
-        },
-        // set pronouns
-        {
-            predicate: () => settings.store.enableMemberProfiles,
-            find: ".USER_PROFILE}};return",
-            replacement: {
-                match: /usernameSection,user:(.),nickname:(.{1,2}),pronouns:null==(.)\?void 0:.\.pronouns,usernameIcon:/,
-                replace: "usernameSection,user:$1,nickname:$self.isPluralKitProfile($1)?null:$2,pronouns:$self.getPluralKitPronouns($1, $3),usernameIcon:"
-            }
-        },
-        // set bio
-        {
-            predicate: () => settings.store.enableMemberProfiles,
-            find: ".USER_PROFILE}};return",
-            replacement: {
-                match: /\{user:(.),guildId:(.{20,200})bio:null==(.)\?void 0:.\.bio,guild:/,
-                replace: "{user:$1,guildId:$2bio:$self.getPluralKitBio($1,$3),guild:"
-            }
-        },
-         */
+        }
     ],
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
     isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberID(user)] != null,
     isOwnMessage: (message: Message) => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
-    getPluralKitPronouns: (user: User, idfk) => pkMemberInfo[getPkMemberID(user)]?.pronouns ?? idfk?.pronouns ?? void 0,
-    getPluralKitBio: (user: User, idfk) => pkMemberInfo[getPkMemberID(user)]?.description ?? idfk?.bio ?? void 0,
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
@@ -216,6 +169,7 @@ export default definePlugin({
 
 
     start() {
+        // noinspection JSIgnoredPromiseFromCall
         fetchColors();
         setInterval(clearExpiredColors, 1000 * 60 * 5);
 
