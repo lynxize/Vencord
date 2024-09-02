@@ -7,7 +7,7 @@
 // combination of various Things From The Internet (stackoverflow posts etc)
 // color stuff like this goes right over my head
 
-export function hexToHSL(hex: string): [number, number, number] {
+export function hexStringToHSL(hex: string): [number, number, number] {
     const r = parseInt("0x" + hex[1] + hex[2]) / 255;
     const g = parseInt("0x" + hex[3] + hex[4]) / 255;
     const b = parseInt("0x" + hex[5] + hex[6]) / 255;
@@ -36,7 +36,7 @@ export function hexToHSL(hex: string): [number, number, number] {
     return [h, s, l];
 }
 
-export function hslToHex(hsl: [number, number, number]): string {
+export function hslToHexString(hsl: [number, number, number]): string {
     let [h, s, l] = hsl;
     s /= 100;
     l /= 100;

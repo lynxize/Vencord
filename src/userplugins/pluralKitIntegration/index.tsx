@@ -13,7 +13,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
 import type { Message, User } from "discord-types/general";
 
-import { hexToHSL, hslToHex } from "./color";
+import { hexStringToHSL, hslToHexString } from "./color";
 
 
 // Inspired By:
@@ -207,8 +207,8 @@ export default definePlugin({
 });
 
 // this loops forever, getting colors as fast as we can without running
-// into the pk api ratelimit of 2 requests per second
-// it's not a great solution, but it works
+// into the pk api ratelimit of ~~2~~ (now 10) requests per second
+// there are smarter ways to do this!
 async function fetchColors() {
     // noinspection InfiniteLoopJS
     while (true) {
@@ -254,8 +254,8 @@ async function fetchColors() {
 
         if (readableColors && (colorMode === "Member" || colorMode === "System")) {
             // todo: this assumes a dark theme
-            const [h, s, l] = hexToHSL(color);
-            color = hslToHex([h, s, Math.max(l, 70)]);
+            const [h, s, l] = hexStringToHSL(color);
+            color = hslToHexString([h, s, Math.max(l, 70)]);
         }
 
         colors[authorId] = {
@@ -265,7 +265,7 @@ async function fetchColors() {
         pkMemberInfo[getPkMemberIDFromAuthorID(authorId)] = json.member;
         if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
 
-        await sleep(500); // we don't want to do more than 2 requests per second
+        await sleep(100); // we don't want to do more than 10 requests per second
     }
 }
 
@@ -323,7 +323,7 @@ type MemberID = string; // **NOT** a 5-6 char pk member id
 type NameColor = {
     expires: number;
     color: string;
-}
+};
 
 const EditIcon = () => {
     return <svg role="img" width="18" height="18" fill="none" viewBox="0 0 24 24">
