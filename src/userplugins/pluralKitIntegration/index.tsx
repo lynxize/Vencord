@@ -12,10 +12,9 @@ import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import {
     ChannelStore,
-    FluxDispatcher,
     GuildMemberStore,
     MessageActions,
-    MessageStore, UserProfileStore,
+    MessageStore,
     UserStore
 } from "@webpack/common";
 import type { Message, User } from "discord-types/general";
@@ -163,25 +162,15 @@ export default definePlugin({
     inject: (user, display) => {
         if (!pkWebhookIds.has(user.id)) return;
 
-        // this is a bit weird and duct-tapey
-        // since we want the username field to be the base account's name, we set the username
-        // but when we set the username, itll no longer match for the pk lookup, so we try the display name
-        // there are a few cases of overlapping names where this could cause issues
-        // but it's Good Enough For Now(tm)
-        const pkMem = pkMemberInfo[user.username + user.avatar] || pkMemberInfo[user.globalName + user.avatar];
-        if (!pkMem) return;
-
-        console.log(pkMem);
-        console.log(display);
-        console.log(user);
+        const pkMem = pkMemberInfo[(user.globalName || user.username) + user.avatar] || {};
 
         user.bot = false;
-        user.username = pkMem.thisIsADirtyHackAccountName;
-        user.globalName = pkMem.name;
+        user.username = pkMem.thisIsADirtyHackAccountName || user.globalName;
+        user.globalName = pkMem.display_name || pkMem.name || user.username;
         user.discriminator = null;
         display.accentColor = pkMem.color;
-        display.bio = pkMem.description;
-        display.pronouns = pkMem.pronouns;
+        display.bio = pkMem.description || "";
+        display.pronouns = pkMem.pronouns || "";
     },
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
@@ -306,8 +295,11 @@ async function fetchColors() {
             expires: Date.now() + 120 * 1000,
         }; // expires two minutes from now
 
-        json.member.thisIsADirtyHackAccountName = UserStore.getUser(json.sender).username;
-        pkMemberInfo[memberIDFromAuthorID(authorId)] = json.member;
+        if (json.member) {
+            console.log(json.sender);
+            json.member.thisIsADirtyHackAccountName = (UserStore.getUser(json.sender) || { username: json.sender }).username;
+            pkMemberInfo[memberIDFromAuthorID(authorId)] = json.member;
+        }
 
 
         if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
