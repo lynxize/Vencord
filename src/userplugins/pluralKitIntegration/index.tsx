@@ -10,7 +10,14 @@ import { definePluginSettings } from "@api/Settings";
 import { Logger } from "@utils/Logger";
 import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
-import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore } from "@webpack/common";
+import {
+    ChannelStore,
+    FluxDispatcher,
+    GuildMemberStore,
+    MessageActions,
+    MessageStore, UserProfileStore,
+    UserStore
+} from "@webpack/common";
 import type { Message, User } from "discord-types/general";
 
 import { hexStringToHSL, hslToHexString } from "./color";
@@ -55,6 +62,7 @@ const colorsToGet = new Array<Message>();
 const ownMembers = new Set<AuthorID>();
 const colors = new Map<AuthorID, NameColor>();
 const pkMemberInfo = new Map<MemberID, any>(); // pk member objects
+const pkWebhookIds = new Set<string>();
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -140,8 +148,41 @@ export default definePlugin({
                 match: /case (.\..{0,5})\.SERVER:(.)=/,
                 replace: "case " + PK_BADGE_ID + ":$2=\"PK\";break;case $1.SERVER:$2="
             }
-        }
+        },
+        {
+            find: "userProfileOuterUnthemed;",
+            replacement: [
+                {
+                    match: /let\{user:(.),displayProfile:(.),(.{0,1000});return/,
+                    replace: "let{user:$1,displayProfile:$2,$3;$self.inject($1, $2);return",
+                },
+            ]
+        },
     ],
+
+    inject: (user, display) => {
+        if (!pkWebhookIds.has(user.id)) return;
+
+        // this is a bit weird and duct-tapey
+        // since we want the username field to be the base account's name, we set the username
+        // but when we set the username, itll no longer match for the pk lookup, so we try the display name
+        // there are a few cases of overlapping names where this could cause issues
+        // but it's Good Enough For Now(tm)
+        const pkMem = pkMemberInfo[user.username + user.avatar] || pkMemberInfo[user.globalName + user.avatar];
+        if (!pkMem) return;
+
+        console.log(pkMem);
+        console.log(display);
+        console.log(user);
+
+        user.bot = false;
+        user.username = pkMem.thisIsADirtyHackAccountName;
+        user.globalName = pkMem.name;
+        user.discriminator = null;
+        display.accentColor = pkMem.color;
+        display.bio = pkMem.description;
+        display.pronouns = pkMem.pronouns;
+    },
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
     isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberID(user)] != null,
@@ -150,6 +191,8 @@ export default definePlugin({
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
         if (!isPkProxiedMessage(message) || settings.store.colorMode === "None")
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
+
+        pkWebhookIds.add(message.webhookId); // todo: this kinda sucks
 
         const authorId = getAuthorID(message)!!;
         let color: NameColor = colors[authorId];
@@ -262,7 +305,11 @@ async function fetchColors() {
             color: color,
             expires: Date.now() + 120 * 1000,
         }; // expires two minutes from now
-        pkMemberInfo[getPkMemberIDFromAuthorID(authorId)] = json.member;
+
+        json.member.thisIsADirtyHackAccountName = UserStore.getUser(json.sender).username;
+        pkMemberInfo[memberIDFromAuthorID(authorId)] = json.member;
+
+
         if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
 
         await sleep(100); // we don't want to do more than 10 requests per second
@@ -278,7 +325,7 @@ async function clearExpiredColors() {
     for (const authorId in colors.keys()) {
         if (colors[authorId].expires < now) {
             colors.delete(authorId);
-            pkMemberInfo.delete(getPkMemberIDFromAuthorID(authorId)); // also remove from saved pk members
+            pkMemberInfo.delete(memberIDFromAuthorID(authorId)); // also remove from saved pk members
             num++;
         }
     }
@@ -311,7 +358,7 @@ function getPkMemberID(user: User): MemberID {
     return user.username + user.avatar;
 }
 
-function getPkMemberIDFromAuthorID(author: AuthorID): MemberID {
+function memberIDFromAuthorID(author: AuthorID): MemberID {
     const a = author.split(" ");
     a.pop(); // removes channel id
     return a.join(" ");
