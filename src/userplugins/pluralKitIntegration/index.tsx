@@ -14,6 +14,7 @@ import { ChannelStore, GuildMemberStore, MessageActions, MessageStore, UserStore
 import type { Message, User } from "discord-types/general";
 
 import { hexStringToHSL, hslToHexString } from "./color";
+import { PencilIcon } from "@components/Icons";
 
 
 // Inspired By:
@@ -50,11 +51,10 @@ const PLURALKIT_BOT_ID = "466378653216014359";
 // This Is Very Good Code :tm: /s
 const PK_BADGE_ID = 237;
 
-
 const colorsToGet = new Array<Message>();
 const ownMembers = new Set<AuthorID>();
-const colors = new Map<AuthorID, NameColor>();
-const pkMemberInfo = new Map<MemberID, any>(); // pk member objects
+const authorColors = new Map<AuthorID, NameColor>();
+const cachedPkMemberInfo = new Map<MemberID, any>(); // pk member objects
 
 const logger = new Logger("PluralKitIntegration");
 
@@ -70,7 +70,7 @@ const settings = definePluginSettings({
         ],
         restartNeeded: true, // to update previously rendered names
         onChange(_: any) {
-            colors.clear();
+            authorColors.clear();
         }
     },
     readableColors: {
@@ -79,7 +79,7 @@ const settings = definePluginSettings({
         default: false,
         restartNeeded: true,
         onChange(_: any) {
-            colors.clear();
+            authorColors.clear();
         }
     },
     enableTag: {
@@ -88,6 +88,12 @@ const settings = definePluginSettings({
         default: true,
         restartNeeded: true
     },
+    enableButtons: {
+        description: "Add Edit and Delete buttons on proxied messages",
+        type: OptionType.BOOLEAN,
+        default: true,
+        restartNeeded: false
+    }
 });
 
 
@@ -107,7 +113,7 @@ export default definePlugin({
         // color usernames in chat
         {
             // todo: conflicts with showMeYourName
-            find: '?"@":"")',
+            find: '?"@":""',
             replacement: {
                 match: /(?<=onContextMenu:\i,children:).*?\)}/,
                 replace: "$self.renderUsername(arguments[0])}"
@@ -124,6 +130,7 @@ export default definePlugin({
             }
         },
         // if a message is proxied, forcibly change the tag type to pk
+        // this patch is kind of nasty, but I'm terrible wtih regex
         {
             predicate: () => settings.store.enableTag,
             find: "isSystemDM())?",
@@ -144,7 +151,7 @@ export default definePlugin({
     ],
 
     changeBotBadge: (message: Message) => isPkProxiedMessage(message) ? PK_BADGE_ID : 0, // 0 is bot tag id
-    isPluralKitProfile: (user: User) => pkMemberInfo[getPkMemberID(user)] != null,
+    isPluralKitProfile: (user: User) => cachedPkMemberInfo[getPkMemberID(user)] != null,
     isOwnMessage: (message: Message) => isOwnPkMessage(message) || message.author.id === UserStore.getCurrentUser().id,
 
     renderUsername: ({ author, message, withMentionPrefix }) => useAwaiter(async () => {
@@ -152,13 +159,13 @@ export default definePlugin({
             return <>{withMentionPrefix ? "@" : ""}{author?.nick}</>;
 
         const authorId = getAuthorID(message)!!;
-        let color: NameColor = colors[authorId];
+        let color: NameColor = authorColors[authorId];
         if (!color || color.expires < Date.now()) colorsToGet.push(message);
 
         while (!color) {
             // wait around until it gets around to fetching the color we want
-            await sleep(500);
-            color = colors[authorId];
+            await sleep(300);
+            color = authorColors[authorId];
         }
 
         return <span style={{ color: color.color }}>
@@ -174,10 +181,10 @@ export default definePlugin({
         setInterval(clearExpiredColors, 1000 * 60 * 5);
 
         addButton("PkEdit", msg => {
-            if (!msg || !isOwnPkMessage(msg)) return null;
+            if (!settings.store.enableButtons || !msg || !isOwnPkMessage(msg)) return null;
             else return {
                 label: "Edit (PK)",
-                icon: EditIcon,
+                icon: PencilIcon,
                 message: msg,
                 channel: ChannelStore.getChannel(msg.channel_id),
                 onClick: () => MessageActions.startEditMessage(msg.channel_id, msg.id, msg.content),
@@ -224,7 +231,7 @@ async function fetchColors() {
         // the point is to not stop this loop, and I don't want to wrap the whole thing in a try block
         if(!authorId) continue;
 
-        const existing = colors[authorId];
+        const existing = authorColors[authorId];
         if (existing && existing.expires > Date.now()) continue; // unexpired one exists, skip
 
         let json: any;
@@ -258,11 +265,12 @@ async function fetchColors() {
             color = hslToHexString([h, s, Math.max(l, 70)]);
         }
 
-        colors[authorId] = {
+        authorColors[authorId] = {
             color: color,
             expires: Date.now() + 120 * 1000,
         }; // expires two minutes from now
-        pkMemberInfo[getPkMemberIDFromAuthorID(authorId)] = json.member;
+
+        cachedPkMemberInfo[getPkMemberIDFromAuthorID(authorId)] = json.member;
         if (json.sender === UserStore.getCurrentUser().id) ownMembers.add(authorId);
 
         await sleep(100); // we don't want to do more than 10 requests per second
@@ -275,10 +283,10 @@ async function fetchColors() {
 async function clearExpiredColors() {
     let num = 0;
     const now = Date.now();
-    for (const authorId in colors.keys()) {
-        if (colors[authorId].expires < now) {
-            colors.delete(authorId);
-            pkMemberInfo.delete(getPkMemberIDFromAuthorID(authorId)); // also remove from saved pk members
+    for (const authorId in authorColors.keys()) {
+        if (authorColors[authorId].expires < now) {
+            authorColors.delete(authorId);
+            cachedPkMemberInfo.delete(getPkMemberIDFromAuthorID(authorId)); // also remove from saved pk members
             num++;
         }
     }
@@ -323,11 +331,4 @@ type MemberID = string; // **NOT** a 5-6 char pk member id
 type NameColor = {
     expires: number;
     color: string;
-};
-
-const EditIcon = () => {
-    return <svg role="img" width="18" height="18" fill="none" viewBox="0 0 24 24">
-        <path fill="currentColor"
-            d="m13.96 5.46 4.58 4.58a1 1 0 0 0 1.42 0l1.38-1.38a2 2 0 0 0 0-2.82l-3.18-3.18a2 2 0 0 0-2.82 0l-1.38 1.38a1 1 0 0 0 0 1.42ZM2.11 20.16l.73-4.22a3 3 0 0 1 .83-1.61l7.87-7.87a1 1 0 0 1 1.42 0l4.58 4.58a1 1 0 0 1 0 1.42l-7.87 7.87a3 3 0 0 1-1.6.83l-4.23.73a1.5 1.5 0 0 1-1.73-1.73Z"></path>
-    </svg>;
 };
